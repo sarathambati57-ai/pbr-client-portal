@@ -61,18 +61,37 @@ export default function ReviewPanel({ workItem, currentVersion, fileUrl }: any) 
         </div>
       )}
 
-      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 space-y-3">
         {fileUrl ? (
-          workItem.work_type === "reel" || workItem.work_type === "video" ? (
-            <video src={fileUrl} controls className="w-full rounded-lg max-h-[480px]" />
-          ) : workItem.work_type === "document" ? (
-            <a href={fileUrl} target="_blank" className="text-amber-400 underline">
-              Open document
-            </a>
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={fileUrl} alt={workItem.title} className="w-full rounded-lg max-h-[480px] object-contain" />
-          )
+          <>
+            {workItem.work_type === "reel" || workItem.work_type === "video" ? (
+              <video src={fileUrl} controls playsInline className="w-full rounded-lg max-h-[480px]" />
+            ) : workItem.work_type === "document" ? (
+              <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-amber-400 underline">
+                Open document
+              </a>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fileUrl} alt={workItem.title} className="w-full rounded-lg max-h-[480px] object-contain" />
+            )}
+
+            {(workItem.work_type === "reel" || workItem.work_type === "video" || workItem.work_type === "poster" || workItem.work_type === "image") && (
+              <div className="pt-1 border-t border-neutral-800">
+                <a
+                  href={fileUrl}
+                  download={currentVersion?.file_name || true}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-amber-400 hover:text-amber-300 transition mt-3"
+                >
+                  ⬇ Open / download original file
+                </a>
+                <p className="text-neutral-600 text-xs mt-1">
+                  On iPhone or Mac, this opens the file in a new tab — tap the Share icon (or press and hold the video) and choose Save Video / Save to Files.
+                </p>
+              </div>
+            )}
+          </>
         ) : (
           <p className="text-neutral-500 text-sm">
             The file for this version is no longer available on the server. Contact the agency to have it resent.
