@@ -10,7 +10,7 @@ export default async function AdminWorkDetail({ params }: { params: Promise<{ id
     .from("work_items")
     .select(`
       id, title, work_type, description, status, current_version,
-      clients(id, company_name), projects(name),
+      clients(id, company_name), projects(name), client_id,
       work_versions(id, version_number, file_path, file_deleted, uploaded_at),
       reviews(id, decision, remarks, created_at)
     `)
@@ -73,7 +73,13 @@ export default async function AdminWorkDetail({ params }: { params: Promise<{ id
       )}
 
       {workItem.status === "changes_requested" && (
-        <ReviseForm workItemId={workItem.id} title={workItem.title} />
+        <ReviseForm
+          workItemId={workItem.id}
+          title={workItem.title}
+          clientId={(workItem as any).client_id}
+          currentVersion={workItem.current_version}
+          previousFilePath={currentVersion?.file_path ?? null}
+        />
       )}
     </div>
   );
