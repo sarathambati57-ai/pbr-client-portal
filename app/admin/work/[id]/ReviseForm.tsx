@@ -2,11 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
-export default function ReviseForm({ workItemId, title }: { workItemId: string; title: string }) {
+export default function ReviseForm({
+  workItemId, title, clientId, currentVersion, previousFilePath,
+}: {
+  workItemId: string;
+  title: string;
+  clientId: string;
+  currentVersion: number;
+  previousFilePath: string | null;
+}) {
   const router = useRouter();
+  const supabase = createClient();
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [progressText, setProgressText] = useState("");
   const [error, setError] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -15,19 +26,59 @@ export default function ReviseForm({ workItemId, title }: { workItemId: string; 
     setLoading(true);
     setError("");
 
-    const formData = new FormData();
-    formData.append("workItemId", workItemId);
-    formData.append("title", title);
-    formData.append("clientId", ""); // not needed for revision path, kept for shared route shape
-    formData.append("workType", "reel");
-    formData.append("file", file);
+    try {
+      // Delete the old (rejected) file first, then upload the new one —
+      // both go straight from the browser to Supabase Storage, never
+      // through our server, so there's no size limit on the video itself.
+      setProgressText("Removing old version...");
+      if (previousFilePath) {
+        await supabase.storage.from("work-files").remove([previousFilePath]);
+      }
 
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    const result = await res.json();
-    setLoading(false);
+      setProgressText("Uploading revised file...");
+      const newVersionNumber = currentVersion + 1;
+      const fileExt = file.name.split(".").pop();
+      const filePath = `${clientId}/${workItemId}/v${newVersionNumber}-${Date.now()}.${fileExt}`;
 
-    if (!res.ok) { setError(result.error || "Upload failed"); return; }
-    router.refresh();
+      const { error: storageError } = await supabase.storage
+        .from("work-files")
+        .upload(filePath, file, { contentType: file.type });
+
+      if (storageError) {
+        setError(`Upload failed: ${storageError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      setProgressText("Saving details...");
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          existingWorkItemId: workItemId,
+          title,
+          filePath,
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        await supabase.storage.from("work-files").remove([filePath]);
+        setError(result.error || "Upload failed");
+        setLoading(false);
+        return;
+      }
+
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+      setProgressText("");
+    }
   }
 
   return (
@@ -45,7 +96,7 @@ export default function ReviseForm({ workItemId, title }: { workItemId: string; 
         disabled={loading}
         className="rounded-lg bg-amber-400 text-neutral-950 font-medium px-4 py-2 hover:bg-amber-300 transition disabled:opacity-60"
       >
-        {loading ? "Uploading..." : "Submit revised version"}
+        {loading ? (progressText || "Uploading...") : "Submit revised version"}
       </button>
     </form>
   );
