@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 type Client = {
   id: string;
@@ -21,10 +22,12 @@ const emptyForm = {
 
 export default function UploadForm({ clients }: { clients: Client[] }) {
   const router = useRouter();
+  const supabase = createClient();
   const [form, setForm] = useState(emptyForm);
   const [file, setFile] = useState<File | null>(null);
-  const [fileInputKey, setFileInputKey] = useState(0); // bump this to force the file picker to visually clear
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [progressText, setProgressText] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
@@ -50,31 +53,66 @@ export default function UploadForm({ clients }: { clients: Client[] }) {
 
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append("clientId", form.clientId);
-    formData.append("projectId", form.projectId);
-    formData.append("newProjectName", form.newProjectName);
-    formData.append("title", form.title);
-    formData.append("workType", form.workType);
-    formData.append("description", form.description);
-    formData.append("dueDate", form.dueDate);
-    formData.append("file", file);
+    try {
+      // Step 1: upload the actual file straight to Supabase Storage from the
+      // browser. This never touches our server, so there's no size limit
+      // from Vercel — only Supabase's own (much larger) storage limit applies.
+      setProgressText("Uploading file...");
+      const workItemId = crypto.randomUUID();
+      const fileExt = file.name.split(".").pop();
+      const filePath = `${form.clientId}/${workItemId}/v1-${Date.now()}.${fileExt}`;
 
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    const result = await res.json();
-    setLoading(false);
+      const { error: storageError } = await supabase.storage
+        .from("work-files")
+        .upload(filePath, file, { contentType: file.type });
 
-    if (!res.ok) {
-      setError(result.error || "Upload failed.");
-      return;
+      if (storageError) {
+        setError(`Upload failed: ${storageError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: tell our server about it — just text, so this is instant.
+      setProgressText("Saving details...");
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workItemId,
+          clientId: form.clientId,
+          projectId: form.projectId,
+          newProjectName: form.newProjectName,
+          title: form.title,
+          workType: form.workType,
+          description: form.description,
+          dueDate: form.dueDate,
+          filePath,
+          fileName: file.name,
+          fileType: file.type,
+          fileSize: file.size,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        // Roll back the orphaned file since the database part failed
+        await supabase.storage.from("work-files").remove([filePath]);
+        setError(result.error || "Upload failed.");
+        setLoading(false);
+        return;
+      }
+
+      setForm(emptyForm);
+      setFile(null);
+      setFileInputKey((k) => k + 1);
+      setSuccess(true);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+      setProgressText("");
     }
-
-    // Full reset — clear every field and visually clear the file picker too,
-    // so the form looks genuinely empty/ready for the next upload.
-    setForm(emptyForm);
-    setFile(null);
-    setFileInputKey((k) => k + 1);
-    setSuccess(true);
   }
 
   if (success) {
@@ -202,7 +240,7 @@ export default function UploadForm({ clients }: { clients: Client[] }) {
         disabled={loading}
         className="w-full rounded-lg bg-amber-400 text-neutral-950 font-medium py-2 hover:bg-amber-300 transition disabled:opacity-60"
       >
-        {loading ? "Uploading..." : "Submit for approval"}
+        {loading ? (progressText || "Uploading...") : "Submit for approval"}
       </button>
     </form>
   );
